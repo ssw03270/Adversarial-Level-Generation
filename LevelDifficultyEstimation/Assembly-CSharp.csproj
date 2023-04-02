@@ -112,7 +112,6 @@
     <Compile Include="Assets\ML-Agents\Examples\PushBlock\Scripts\PushAgentBasic.cs" />
     <Compile Include="Assets\ML-Agents\Examples\DungeonEscape\Scripts\DungeonEscapeEnvController.cs" />
     <Compile Include="Assets\ML-Agents\Examples\Soccer\Scripts\AgentSoccer.cs" />
-    <Compile Include="Assets\Scripts\RLManager.cs" />
     <Compile Include="Assets\ML-Agents\Examples\SharedAssets\Scripts\OrientationCubeController.cs" />
     <Compile Include="Assets\ML-Agents\Examples\Match3\Scripts\Match3Drawer.cs" />
     <Compile Include="Assets\ML-Agents\Examples\Match3\Scripts\Match3Agent.cs" />

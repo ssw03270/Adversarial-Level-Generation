@@ -9,6 +9,8 @@ using Unity.MLAgents.Policies;
 
 public class LevelGenerator : Agent
 {
+    public LevelSolver levelSolver;
+
     public GameObject floorObject;
     public GameObject startObject;
     public GameObject endObject;
@@ -25,8 +27,6 @@ public class LevelGenerator : Agent
     public float minWorld = 0;
     public float maxWorld = 50;
 
-    public float maxChange = 50;
-
     public static bool isGenerateAble = false;
 
     public Vector3 startPosition;
@@ -38,7 +38,6 @@ public class LevelGenerator : Agent
     public GameObject latestObject2;
     public GameObject targetObject;
 
-    private float currentChange = 0;
     private float yScale = 0.5f;
 
     float ReturnNewRange(float value, float newMin, float newMax)
@@ -50,13 +49,16 @@ public class LevelGenerator : Agent
         return newValue;
     }
 
-    void ReturnReward()
+    public void ReturnReward(float additionalReward)
     {
-        float normalizedDistance = Vector3.Distance(latestObject.transform.position, targetObject.transform.position) / Vector3.Distance(startPosition, endPosition);
-        float extReward = 0;
-        float intReward = -1 * Mathf.Log(normalizedDistance);
+        float normalizedDistance = Vector3.Distance(levelSolver.transform.position, latestObject.transform.position) /
+            Vector3.Distance(latestObject.transform.position, latestObject2.transform.position);
+        float extReward = Mathf.Exp(-3 * normalizedDistance);
 
-        SetReward(intReward + extReward);
+        normalizedDistance = Vector3.Distance(latestObject.transform.position, targetObject.transform.position) / Vector3.Distance(startPosition, endPosition);
+        float intReward = Mathf.Exp(-3 * normalizedDistance);
+
+        SetReward(intReward + extReward + additionalReward);
     }
     public override void OnEpisodeBegin()
     {
@@ -78,25 +80,23 @@ public class LevelGenerator : Agent
         targetObject = Instantiate(endObject, endPosition, Quaternion.identity);
 
         float scale = Random.Range(minScale, maxScale);
-        latestObject.transform.localScale = new Vector3(scale, yScale, scale);
+        latestObject.transform.GetChild(0).localScale = new Vector3(scale, yScale, scale);
         scale = Random.Range(minScale, maxScale);
-        latestObject2.transform.localScale = new Vector3(scale, yScale, scale);
+        latestObject2.transform.GetChild(0).localScale = new Vector3(scale, yScale, scale);
         scale = Random.Range(minScale, maxScale);
-        targetObject.transform.localScale = new Vector3(scale, yScale, scale);
+        targetObject.transform.GetChild(0).localScale = new Vector3(scale, yScale, scale);
 
-        currentChange = 0;
-
-        RLManager.solverCopy.transform.position = startPosition + new Vector3(0, 1, 0);
+        levelSolver.transform.position = startPosition + new Vector3(0, 1, 0);
     }
 
     public override void CollectObservations(VectorSensor sensor)
     {
-        sensor.AddObservation(transform.InverseTransformPoint(targetObject.transform.position));
-/*        sensor.AddObservation(transform.InverseTransformDirection(targetObject.transform.eulerAngles));*/
-        sensor.AddObservation(Vector3.Distance(latestObject.transform.position, targetObject.transform.position));
-        sensor.AddObservation(transform.InverseTransformPoint(latestObject.transform.position));
-        /*        sensor.AddObservation(transform.InverseTransformDirection(latestObject.transform.eulerAngles));*/
+        sensor.AddObservation(latestObject.transform.InverseTransformPoint(endPosition));
+        sensor.AddObservation((endPosition - latestObject.transform.position).normalized);
+        sensor.AddObservation(Vector3.Distance(endPosition, latestObject.transform.position));
+        sensor.AddObservation(latestObject.transform.InverseTransformPoint(latestObject2.transform.position));
         sensor.AddObservation(latestObject.transform.lossyScale);
+        sensor.AddObservation((latestObject2.transform.position - latestObject.transform.position).normalized);
     }
 
 
@@ -104,8 +104,6 @@ public class LevelGenerator : Agent
     {
         if (isGenerateAble)
         {
-            currentChange += 1;
-
             var continuousActions = actionBuffers.ContinuousActions;
             float distance = ReturnNewRange(continuousActions[0], minDistance, maxDistance);
             float angle = ReturnNewRange(continuousActions[1], minAngle, maxAngle);
@@ -117,27 +115,17 @@ public class LevelGenerator : Agent
             vec *= distance;
             Vector3 newPosition = latestObject.transform.position + vec + new Vector3(0, height, 0);
             GameObject newObject = Instantiate(floorObject, newPosition, Quaternion.identity);
-            newObject.transform.localScale = new Vector3(scale, yScale, scale);
+            newObject.transform.GetChild(0).localScale = new Vector3(scale, yScale, scale);
 
             latestObject2 = latestObject;
             latestObject = newObject;
 
             isGenerateAble = false;
-        }
 
-        if (RLManager.mode == 1)
-        {
-            ReturnReward();
-        }
-
-        float normalizedDistance = Vector3.Distance(latestObject.transform.position, targetObject.transform.position) / Vector3.Distance(startPosition, endPosition);
-        if (currentChange > maxChange || normalizedDistance < 0.01f)
-        {
-            if (RLManager.mode == 1)
+            if(newObject.transform.position.y < 0)
             {
-                RLManager.currentGeneratorStep += 1;
+                ReturnReward(-100);
             }
-            EndEpisode();
         }
     }
 }

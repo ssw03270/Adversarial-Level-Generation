@@ -21,6 +21,7 @@ TagManager:
   - dragon
   - lock
   - touchedFloor
+  - endFloor
   layers:
   - Default
   - TransparentFX

@@ -444,7 +444,6 @@
 "Assets/ML-Agents/TestScenes/TestCompressedTexture/TestTextureSensorComponent.cs"
 "Assets/Scripts/LevelGenerator.cs"
 "Assets/Scripts/LevelSolver.cs"
-"Assets/Scripts/RLManager.cs"
 -langversion:9.0
 
 /deterministic
