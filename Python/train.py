@@ -1,15 +1,23 @@
 from mlagents_envs.environment import UnityEnvironment as UE
-from mlagents_envs.base_env import ActionTuple
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfigurationChannel
+from mlagents_envs.base_env import ActionTuple
 
-from tools.tools import get_observation_size, get_observation, get_action_size
-from tools.PPO import PPO
-
-import numpy as np
 import torch
+import numpy as np
+from collections import deque
+import time
+# import imageio
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-def train(env, train_agent, test_agent):
+from tools.PPO import PPO, MemoryBuffer
+from tools.tools import get_observation_size, get_observation, get_action_size
+
+n_episodes = 40000
+update_interval = 16000
+log_interval = 10
+
+def train(env, train_agent, test_agent, memory, time_step):
     env.reset()
     done = False
     total_reward = 0
@@ -18,12 +26,15 @@ def train(env, train_agent, test_agent):
         test(env, test_agent)
 
         decision_steps, terminal_steps = env.get_steps(train_agent['name'])
-        observation = np.array(get_observation(decision_steps.obs)).astype(np.float32)
-        prob = train_agent['model'].pi(torch.from_numpy(observation)).detach().numpy()
-        action_matrix = prob + np.random.normal(loc=0, scale=1.0, size=prob.shape)
-        action = np.clip(action_matrix, -1, 1).reshape((1, -1))
-        env.set_actions(train_agent['name'], ActionTuple(continuous=action))
+        state = np.array(get_observation(decision_steps.obs))
 
+        action, log_prob = train_agent['model'].select_action(state)
+
+        memory.states.append(state)
+        memory.actions.append(action.detach().numpy())
+        memory.logprobs.append(log_prob)
+
+        env.set_actions(train_agent['name'], ActionTuple(continuous=np.array([action.data.numpy()])))
         env.step()
 
         decision_steps, terminal_steps = env.get_steps(train_agent['name'])
@@ -31,34 +42,37 @@ def train(env, train_agent, test_agent):
 
         if not done:
             reward = decision_steps.reward[0]
-            next_observation = np.array(get_observation(decision_steps.obs))
         else:
             reward = terminal_steps.reward[0]
-            next_observation = np.array(get_observation(terminal_steps.obs))
+
         total_reward += reward
 
-        train_agent['model'].put_data((observation, action, reward, next_observation, prob, done))
+        memory.rewards.append(reward)
+        memory.dones.append(done)
 
-    train_agent['model'].train_net()
-    return total_reward
+        time_step += 1
+        if time_step % update_interval == 0:
+            train_agent['model'].update(memory)
+            time_step = 0
+            memory.clear_buffer()
+
+    return total_reward, time_step
 
 def test(env, agent):
     decision_steps, terminal_steps = env.get_steps(agent['name'])
-    observation = np.array(get_observation(decision_steps.obs))
-    prob = agent['model'].pi(torch.from_numpy(observation.astype(np.float32))).detach().numpy()
-    action_matrix = prob + np.random.normal(
-        loc=0, scale=1.0, size=prob.shape
-    )
-    action = np.clip(action_matrix, -1, 1).reshape((1, -1))
-    env.set_actions(agent['name'], ActionTuple(continuous=action))
+    state = np.array(get_observation(decision_steps.obs))
 
-if __name__ == '__main__':
+    action, log_prob = agent['model'].select_action(state)
+
+    env.set_actions(agent['name'], ActionTuple(continuous=np.array([action.data.numpy()])))
+
+def main():
     file_path = 'Build/LevelDifficultyEstimation.exe'
     config_channel = EngineConfigurationChannel()
     config_channel.set_configuration_parameters(
-        width=900, height=450, time_scale=50.0
+        width=900, height=450, time_scale=100.0
     )
-    env = UE(file_name=file_path, seed=1, side_channels=[config_channel])
+    env = UE(file_name=file_path, seed=1, side_channels=[config_channel], no_graphics=True)
     env.reset()
 
     behavior_names = list(env.behavior_specs)
@@ -78,26 +92,31 @@ if __name__ == '__main__':
     generator_act_size = get_action_size(generator_spec.action_spec)
     solver_act_size = get_action_size(solver_spec.action_spec)
 
-    generator_model = PPO(obs_size=generator_obs_size, act_size=generator_act_size)
-    solver_model = PPO(obs_size=solver_obs_size, act_size=solver_act_size)
+    generator_memory = MemoryBuffer()
+    solver_memory = MemoryBuffer()
+    generator_model = PPO(state_size=generator_obs_size, action_size=generator_act_size)
+    solver_model = PPO(state_size=solver_obs_size, action_size=solver_act_size)
 
     generator = {'name': generator_name, 'spec': generator_spec, 'model': generator_model}
     solver = {'name': solver_name, 'spec': solver_spec, 'model': solver_model}
 
     is_solver_turn = True
-    episode_num = 100000
     solver_max = 100
     generator_max = 1000
     solver_current = 0
     generator_current = 0
+    solver_time_step = 0
+    generator_time_step = 0
     total_reward = []
-    for episode in tqdm(range(1, episode_num + 1)):
+    for episode in tqdm(range(1, n_episodes + 1)):
         if is_solver_turn:
-            total_reward.append(train(env, solver, generator))
+            reward, solver_time_step = train(env, solver, generator, solver_memory, solver_time_step)
+            total_reward.append(reward)
             train_agent = solver
             solver_current += 1
         else:
-            total_reward.append(train(env, generator, solver))
+            reward, generator_time_step = train(env, generator, solver, generator_memory, generator_time_step)
+            total_reward.append(reward)
             train_agent = generator
             generator_current += 1
 
@@ -109,7 +128,9 @@ if __name__ == '__main__':
             solver_current = generator_current = 0
             print(f"{train_agent['name']}: Episode {episode}, Mean Reward {mean:.2f}, Std Reward {std:.2f}")
 
-    torch.save(generator_model.state_dict(), "./generator.h5")
-    torch.save(solver_model.state_dict(), "./solver.h5")
+    torch.save(generator_model.policy_old.state_dict(), 'generator_model.pth')
+    torch.save(solver_model.policy_old.state_dict(), 'solver_model.pth')
 
     env.close()
+
+main()

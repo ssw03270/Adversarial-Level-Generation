@@ -51,11 +51,11 @@ public class LevelGenerator : Agent
 
     public void ReturnReward(float additionalReward)
     {
-        float normalizedDistance = Vector3.Distance(levelSolver.transform.position, latestObject.transform.position) /
-            Vector3.Distance(latestObject.transform.position, latestObject2.transform.position);
+        float normalizedDistance = Vector3.Distance(levelSolver.transform.position, endPosition) /
+            Vector3.Distance(startPosition, endPosition);
         float extReward = Mathf.Exp(-3 * normalizedDistance);
 
-        normalizedDistance = Vector3.Distance(latestObject.transform.position, targetObject.transform.position) / Vector3.Distance(startPosition, endPosition);
+        normalizedDistance = Vector3.Distance(latestObject.transform.position, endPosition) / Vector3.Distance(startPosition, endPosition);
         float intReward = Mathf.Exp(-3 * normalizedDistance);
 
         SetReward(intReward + extReward + additionalReward);
