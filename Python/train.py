@@ -3,17 +3,15 @@ from mlagents_envs.side_channel.engine_configuration_channel import EngineConfig
 from mlagents_envs.base_env import ActionTuple
 
 import torch
-import numpy as np
-from collections import deque
-import time
-# import imageio
 from torch.utils.tensorboard import SummaryWriter
+
+import numpy as np
 from tqdm import tqdm
 
 from tools.PPO import PPO, MemoryBuffer
 from tools.tools import get_observation_size, get_observation, get_action_size
 
-n_episodes = 40000
+n_episodes = 200000
 update_interval = 16000
 log_interval = 10
 
@@ -31,7 +29,7 @@ def train(env, train_agent, test_agent, memory, time_step):
         action, log_prob = train_agent['model'].select_action(state)
 
         memory.states.append(state)
-        memory.actions.append(action.detach().numpy())
+        memory.actions.append(action.numpy())
         memory.logprobs.append(log_prob)
 
         env.set_actions(train_agent['name'], ActionTuple(continuous=np.array([action.data.numpy()])))
@@ -100,6 +98,8 @@ def main():
     generator = {'name': generator_name, 'spec': generator_spec, 'model': generator_model}
     solver = {'name': solver_name, 'spec': solver_spec, 'model': solver_model}
 
+    writer = SummaryWriter('./log_dir')
+
     is_solver_turn = True
     solver_max = 100
     generator_max = 1000
@@ -127,10 +127,12 @@ def main():
             total_reward = []
             solver_current = generator_current = 0
             print(f"{train_agent['name']}: Episode {episode}, Mean Reward {mean:.2f}, Std Reward {std:.2f}")
+            writer.add_scalar("Reward/{}".format(train_agent['name']), mean, episode)
 
-    torch.save(generator_model.policy_old.state_dict(), 'generator_model.pth')
-    torch.save(solver_model.policy_old.state_dict(), 'solver_model.pth')
+            torch.save(generator_model.policy_old.state_dict(), 'generator_model.pth')
+            torch.save(solver_model.policy_old.state_dict(), 'solver_model.pth')
 
     env.close()
+    writer.close()
 
 main()
